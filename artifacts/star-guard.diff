@@ -1,0 +1,134 @@
+diff --git a/scripts/generate-top-lists.sh b/scripts/generate-top-lists.sh
+index 3d87be6..45d2aaf 100755
+--- a/scripts/generate-top-lists.sh
++++ b/scripts/generate-top-lists.sh
+@@ -12,10 +12,12 @@ import html
+ import http.client
+ import json
+ import os
++import re
+ import sys
+ import time
+ import urllib.error
+ import urllib.request
++from collections import defaultdict
+ from pathlib import Path
+ 
+ REPO_DIR = Path(sys.argv[1])
+@@ -50,6 +52,105 @@ def fmt_num(n):
+ def display_name(item):
+     return html.unescape(item.get("name") or item.get("title") or "")
+ 
++# --- Star-attribution guard helpers -------------------------------------------
++# The browse API does NOT return each skill's source URL, so we read it from the
++# local SKILL.md frontmatter. A skill whose source points INTO a monorepo
++# (a subdirectory/file, not the repo root) must not inherit the whole repo's
++# stargazer count as its own popularity. Stdlib-only, no YAML dependency.
++
++# Matches github.com/<owner>/<repo>/(tree|blob)/<ref>/<something-more>
++MONOREPO_RE = re.compile(
++    r"github\.com/(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+)/(?:tree|blob)/[^/\s]+/.+",
++    re.IGNORECASE,
++)
++
++def read_source_from_frontmatter(slug):
++    """Return the `source:` URL from skills/<slug>/SKILL.md frontmatter, or ''."""
++    if not slug:
++        return ""
++    try:
++        text = (REPO_DIR / "skills" / slug / "SKILL.md").read_text(encoding="utf-8")
++    except (OSError, UnicodeDecodeError):
++        return ""
++    if not text.startswith("---"):
++        return ""
++    end = text.find("\n---", 3)
++    front = text[:end] if end != -1 else text
++    for line in front.splitlines():
++        m = re.match(r"\s*source\s*:\s*(.+?)\s*$", line)
++        if m:
++            return m.group(1).strip().strip('"').strip("'")
++    return ""
++
++def monorepo_parent(url):
++    """If url points into a repo subdir/file, return 'owner/repo'; else None.
++    Repo-root URLs (optionally /tree/<branch> with no further path) return None."""
++    if not url:
++        return None
++    m = MONOREPO_RE.search(url.strip())
++    return f"{m.group('owner')}/{m.group('repo')}" if m else None
++
++def apply_star_guard(items_list):
++    """Null github_stars that are repo-level rather than skill-level.
++
++    (a) AUTHORITATIVE: source (from local frontmatter) points into a monorepo
++        subdirectory -> the count is the parent repo's, not this skill's. Null it.
++    (b) LOG-ONLY fallback: the same (tool_match, github_stars) value is shared by
++        >=2 skills. This catches inheritance when a local source is missing, but
++        is NOT auto-nulled because a single real repo with several wrapper skills
++        legitimately shares one value (e.g. two Stripe skills at 4.4k). De-dup by
++        tool already collapses those; we only surface them for human review.
++    """
++    corrected = 0
++    for item in items_list:
++        if int(item.get("github_stars") or 0) <= 0:
++            continue
++        parent = monorepo_parent(read_source_from_frontmatter(item.get("slug", "")))
++        if parent:
++            print(
++                f"[star-guard] null {item.get('slug','')}: "
++                f"{fmt_num(item.get('github_stars'))} -> — (repo-level: {parent})",
++                file=sys.stderr,
++            )
++            item["github_stars"] = 0
++            corrected += 1
++
++    print(f"[star-guard] nulled {corrected} repo-level star attribution(s).", file=sys.stderr)
++
++    # Advisory only: surface tools where many skills share one large star value.
++    # This is EXPECTED and mostly benign — dozens of skills legitimately wrap one
++    # popular tool (e.g. many kubernetes skills all show kubernetes/kubernetes's
++    # real count), and best_per_tool de-dups them anyway. It is printed (capped)
++    # only so a human can spot a monorepo that slipped past rule (a) because its
++    # local SKILL.md source was missing. The repo cannot resolve this on its own —
++    # the authoritative fix is in the source enrichment (it has the source URL).
++    REVIEW_MIN_STARS = 5000
++    suspicious = defaultdict(list)
++    for item in items_list:
++        stars = int(item.get("github_stars") or 0)
++        tool = item.get("tool_match") or ""
++        if stars >= REVIEW_MIN_STARS and tool:
++            suspicious[(tool, stars)].append(item.get("slug", ""))
++    groups = sorted(
++        ((t, s, sl) for (t, s), sl in suspicious.items() if len(sl) >= 2),
++        key=lambda g: -g[1],
++    )
++    if groups:
++        print(
++            f"[star-guard] advisory: {len(groups)} tool(s) have multiple skills "
++            f"sharing one large star value (expected for popular single-repo "
++            f"tools; top 10 by value):",
++            file=sys.stderr,
++        )
++        for tool, stars, slugs in groups[:10]:
++            print(f"    {fmt_num(stars):>7}  {tool:<18} ×{len(slugs)}", file=sys.stderr)
++    print(
++        "[star-guard] NOTE: this guard only removes monorepo inheritance. It does "
++        "NOT correct wrong-repo matches or stale counts — fix those in the source "
++        "enrichment (Prompt 1).",
++        file=sys.stderr,
++    )
++
+ # Fetch all skills
+ items = []
+ page = 1
+@@ -63,6 +164,10 @@ while True:
+ for item in items:
+     item["categories"] = [html.unescape(x) for x in item.get("categories", [])]
+ 
++# Guard against monorepo star inheritance before any ranking/rendering.
++# Only touches github_stars; npm_downloads is left untouched.
++apply_star_guard(items)
++
+ # --- Shared: pick best representative per tool ---
+ def best_per_tool(items_list, signal_key, limit):
+     """Deduplicate by tool_match, picking the best representative per tool.

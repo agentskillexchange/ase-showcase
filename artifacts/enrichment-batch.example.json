@@ -1,0 +1,46 @@
+{
+  "_comment": "SYNTHETIC illustrative example, not live data. Shows the per-skill signals the Data Enrichment Sweep (cron 6) manages, and how the source-side fix handles monorepo subdirectories. Star counts shown are for illustration only.",
+  "generated": "2026-06-24",
+  "records": [
+    {
+      "slug": "vite-dev-server-agent",
+      "tool_match": "vite",
+      "source": "https://github.com/vitejs/vite",
+      "_source_kind": "repo-root",
+      "github_stars": 79900,
+      "npm_downloads": 41200000,
+      "verification": "security_reviewed",
+      "_note": "Source resolves to a repository ROOT -> the star count is genuinely this tool's. Kept."
+    },
+    {
+      "slug": "audit-openclaw",
+      "tool_match": "openclaw",
+      "source": "https://github.com/openclaw/openclaw/tree/main/skills/audit-openclaw",
+      "_source_kind": "monorepo-subdir",
+      "github_stars": null,
+      "npm_downloads": 0,
+      "verification": "listed",
+      "_note": "Source points INTO a monorepo subdirectory. Pre-fix, this inherited openclaw/openclaw's whole-repo count (~356.8k). The source-side fix (Fix B) DROPS github_stars rather than inheriting it -> field is null/absent. See docs/06."
+    },
+    {
+      "slug": "turn-github-issues-into-fix-prs",
+      "tool_match": "openclaw",
+      "source": "https://github.com/openclaw/openclaw/tree/main/skills/turn-github-issues-into-fix-prs",
+      "_source_kind": "monorepo-subdir",
+      "github_stars": null,
+      "npm_downloads": 0,
+      "verification": "listed",
+      "_note": "Sibling folder in the same monorepo. Pre-fix it showed the identical inflated count -> the tell-tale 'many skills share one large value' signature the read-side guard logged."
+    },
+    {
+      "slug": "stripe-payment-intents-agent",
+      "tool_match": "stripe",
+      "source": "https://github.com/stripe/stripe-node",
+      "_source_kind": "repo-root",
+      "github_stars": 4400,
+      "npm_downloads": 8900000,
+      "verification": "security_reviewed",
+      "_note": "A legitimate single-repo tool. Two Stripe skills can share one real value (4.4k) without being a bug; best_per_tool de-dups them in the leaderboards."
+    }
+  ]
+}

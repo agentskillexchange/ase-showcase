@@ -1,0 +1,17 @@
+# Local Claude Code session config — not part of the showcase
+.claude/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Never commit anything resembling a secret
+*.pem
+*.key
+.env
+.env.*
+*api_token*
+*credentials*
